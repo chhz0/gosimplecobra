@@ -4,15 +4,68 @@ import (
 	"fmt"
 
 	"github.com/chhz0/gosimplecobra"
+	"github.com/spf13/pflag"
 )
+
+type RootOption struct {
+	Config     string
+	configPath string
+}
+
+func newRootOption() *RootOption {
+	return &RootOption{
+		Config:     "",
+		configPath: "",
+	}
+}
+
+// LocalFlags implements gosimplecobra.Flags.
+func (r *RootOption) LocalFlagsAndRequired() (fs *pflag.FlagSet, required []string) {
+	fs = pflag.NewFlagSet("RootL", pflag.ExitOnError)
+	fs.StringVarP(&r.configPath, "confPath", "d", ".", "loading config from ?")
+
+	return
+}
+
+// PersistentFlags implements gosimplecobra.Flags.
+func (r *RootOption) PersistentFlagsAndRequired() (fs *pflag.FlagSet, required []string) {
+	fs = pflag.NewFlagSet("RootP", pflag.ExitOnError)
+	fs.StringVarP(&r.Config, "conf", "c", "defaule.toml", "loading config name")
+
+	required = append(required, "conf")
+
+	return
+}
+
+var _ gosimplecobra.Flags = (*RootOption)(nil)
 
 type PrintOption struct {
 	print string
 	from  string
 }
 
-func newPrintCmd() gosimplecobra.Commander {
+func newPrintCmd() gosimplecobra.SimpleCommander {
 	return &PrintOption{}
+}
+
+// SimpleCommands implements gosimplecobra.SimpleCommand.
+func (p *PrintOption) SimpleCommands() []gosimplecobra.SimpleCommander {
+	return nil
+}
+
+// LocalFlagsAndRequired implements gosimplecobra.SimpleCommand.
+func (p *PrintOption) LocalFlagsAndRequired() (fs *pflag.FlagSet, required []string) {
+	fs = pflag.NewFlagSet("PrintL", pflag.ExitOnError)
+	fs.StringVarP(&p.print, "print", "p", "", "print anything to the screen")
+	fs.StringVarP(&p.from, "from", "f", "", "print from where")
+
+	return
+}
+
+// PersistentFlagsAndRequired implements gosimplecobra.SimpleCommand.
+func (p *PrintOption) PersistentFlagsAndRequired() (fs *pflag.FlagSet, required []string) {
+
+	return
 }
 
 // Long implements gosimplecobra.Commander.
@@ -28,14 +81,14 @@ func (p *PrintOption) Commanders() []gosimplecobra.Commander {
 }
 
 // PreRun implements gosimplecobra.Commander.
-func (p *PrintOption) PreRun() error {
+func (p *PrintOption) PreRun(args []string) error {
 	fmt.Println("print cmd pre run")
 
 	return nil
 }
 
 // Run implements gosimplecobra.Commander.
-func (p *PrintOption) Run() error {
+func (p *PrintOption) Run(args []string) error {
 	fmt.Println("print cmd run")
 
 	return nil
@@ -46,7 +99,7 @@ func (p *PrintOption) Use() string {
 	return "print"
 }
 
-var _ gosimplecobra.Commander = (*PrintOption)(nil)
+var _ gosimplecobra.SimpleCommander = (*PrintOption)(nil)
 
 type EchoOption struct {
 }
@@ -70,13 +123,13 @@ func (e *EchoOption) Commanders() []gosimplecobra.Commander {
 }
 
 // PreRun implements gosimplecobra.Commander.
-func (e *EchoOption) PreRun() error {
+func (e *EchoOption) PreRun(args []string) error {
 	fmt.Println("echo cmd pre run")
 	return nil
 }
 
 // Run implements gosimplecobra.Commander.
-func (e *EchoOption) Run() error {
+func (e *EchoOption) Run(args []string) error {
 	fmt.Println("echo cmd run")
 	return nil
 }
@@ -101,13 +154,13 @@ func (t *TimesOption) Commanders() []gosimplecobra.Commander {
 }
 
 // PreRun implements gosimplecobra.Commander.
-func (t *TimesOption) PreRun() error {
+func (t *TimesOption) PreRun(args []string) error {
 	fmt.Println("times cmd pre run")
 	return nil
 }
 
 // Run implements gosimplecobra.Commander.
-func (t *TimesOption) Run() error {
+func (t *TimesOption) Run(args []string) error {
 	fmt.Println("times cmd run")
 	return nil
 }

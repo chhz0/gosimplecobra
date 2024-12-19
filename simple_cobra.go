@@ -8,26 +8,40 @@ import (
 	"github.com/spf13/pflag"
 )
 
+const (
+	useCommandFlags = "[command] [flags]"
+	useFlagsArgs    = "[flags] [args]"
+)
+
+// SimpleCommand 简易命令行接口, 用以处理带有标志的命令行
+// 需要实现 Commander 和 Flags 接口
+type SimpleCommander interface {
+	Commander
+	Flags
+	SimpleCommands() []SimpleCommander
+}
+
+// commander 用以实现 不包含标志 的命令行
 type Commander interface {
 	Use() string
 
 	ShortAndLong() (string, string)
 
-	PreRun() error
+	PreRun(args []string) error
 
-	Run() error
+	Run(args []string) error
 
 	Commanders() []Commander
 }
 
+// Flags 实现标志的接口
+// 注意：你应该返回各函数返回值的空值，而不是 nil
 type Flags interface {
 	// PersistentFlags 持久化的标志
-	PersistentFlags(*pflag.FlagSet)
+	PersistentFlagsAndRequired() (fs *pflag.FlagSet, required []string)
 
 	// LocalFlags 本地的标志
-	LocalFlags(*pflag.FlagSet)
-
-	RequiredFlags(*pflag.FlagSet) []string
+	LocalFlagsAndRequired() (fs *pflag.FlagSet, required []string)
 }
 
 type RootCommand struct {
@@ -38,17 +52,17 @@ type RootCommand struct {
 	Version string
 	Help    string
 
-	FlagSet *pflag.FlagSet
+	FlagSet Flags
 	Args    cobra.PositionalArgs
 
 	Initialize []func()
-	PreRunFunc func(ctx context.Context) error
+	PreRunFunc func(ctx context.Context, args []string) error
 	RunFunc    func(ctx context.Context, args []string) error
 
+	// SimpleCommand 这是一个实现了 SimpleCommander 接口的集合
+	SimpleCommander []SimpleCommander
+	// Commander 这是一个实现了 Commander 接口的集合
 	Commander []Commander
-	RootCobra *cobra.Command
-
-	*DefaultFlags
 }
 
 func NewRootCmd(appName string, opts ...RootOption) *Executor {
@@ -60,27 +74,26 @@ func NewRootCmd(appName string, opts ...RootOption) *Executor {
 		o(rootCmd)
 	}
 
-	rootCmd.RootCobra = &cobra.Command{
-		Use:   rootCmd.Use(),
-		Short: rootCmd.Short,
-		Long:  rootCmd.Long,
+	rootCobra := buildcobra(rootCmd, rootCmd.FlagSet)
+	rootCobra.Args = rootCmd.Args
 
-		Args: rootCmd.Args,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return rootCmd.PreRun()
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return rootCmd.Run()
-		},
+	if rootCmd.Version != "" {
+		rootCobra.Version = rootCmd.Version
 	}
 
 	if rootCmd.Initialize != nil {
 		cobra.OnInitialize(rootCmd.Initialize...)
 	}
 
-	rootCmd.buildCommander()
+	if len(rootCmd.SimpleCommander) != 0 {
+		rootCmd.buildSimpleCommander(rootCobra)
+	}
 
-	return &Executor{exec: rootCmd.RootCobra}
+	if len(rootCmd.Commander) != 0 {
+		rootCmd.buildCommander(rootCobra)
+	}
+
+	return &Executor{exec: rootCobra}
 }
 
 type RootOption func(r *RootCommand)
@@ -97,7 +110,13 @@ func WithRootLong(long string) RootOption {
 	}
 }
 
-func WithFlagSets(flagSets *pflag.FlagSet) RootOption {
+func WithVersion(version string) RootOption {
+	return func(r *RootCommand) {
+		r.Version = version
+	}
+}
+
+func WithFlagSets(flagSets Flags) RootOption {
 	return func(r *RootCommand) {
 		r.FlagSet = flagSets
 	}
@@ -106,6 +125,12 @@ func WithFlagSets(flagSets *pflag.FlagSet) RootOption {
 func WithArgs(args cobra.PositionalArgs) RootOption {
 	return func(r *RootCommand) {
 		r.Args = args
+	}
+}
+
+func WithSimpleCommand(simpleCommand []SimpleCommander) RootOption {
+	return func(r *RootCommand) {
+		r.SimpleCommander = simpleCommand
 	}
 }
 
@@ -121,7 +146,7 @@ func WithInitialize(initF ...func()) RootOption {
 	}
 }
 
-func WithPreRunFunc(preRunF func(ctx context.Context) error) RootOption {
+func WithPreRunFunc(preRunF func(ctx context.Context, args []string) error) RootOption {
 	return func(r *RootCommand) {
 		r.PreRunFunc = preRunF
 	}
@@ -133,78 +158,164 @@ func WithRunFunc(runF func(ctx context.Context, args []string) error) RootOption
 	}
 }
 
-// 构建commandBuilder
-func (rc *RootCommand) buildCommander() {
+func (rc *RootCommand) buildSimpleCommander(rootCobra *cobra.Command) {
+	for _, simpleCmd := range rc.SimpleCommander {
+		simpleCmdBuilder := &commandBuilder{
+			SimpleCommander: simpleCmd,
+		}
+		simpleCmdBuilder.buildCobraInSimpleCommander()
+		rootCobra.AddCommand(simpleCmdBuilder.CobraCommand)
+	}
+}
+
+func (rc *RootCommand) buildCommander(rootCobra *cobra.Command) {
+
 	for _, cmder := range rc.Commander {
 		simpleCmd := &commandBuilder{
-			Command: cmder,
+			Commander: cmder,
 		}
-		simpleCmd.buildCobra()
-		rc.RootCobra.AddCommand(simpleCmd.CobraCommand)
+		simpleCmd.buildCobraInCommander()
+		rootCobra.AddCommand(simpleCmd.CobraCommand)
 	}
 }
 
 func (rc *RootCommand) Use() string {
-	var use = fmt.Sprintf("%s [flags] [args]", rc.AppName)
-	if rc.Commander != nil {
-		use = fmt.Sprintf("%s [command] [flags]", rc.AppName)
-	}
-	return use
+	return rc.AppName
 }
 
-func (rc *RootCommand) PreRun() error {
+func (rc *RootCommand) ShortAndLong() (string, string) {
+	return rc.Short, rc.Long
+}
+
+func (rc *RootCommand) PreRun(args []string) error {
 	if rc.PreRunFunc == nil {
 		return nil
 	}
-	return rc.PreRunFunc(context.Background())
+	return rc.PreRunFunc(context.Background(), args)
 }
 
-func (rc *RootCommand) Run() error {
+func (rc *RootCommand) Run(args []string) error {
 	if rc.RunFunc == nil {
 		return nil
 	}
-	return rc.RunFunc(context.Background(), nil)
+	return rc.RunFunc(context.Background(), args)
 }
 
 func (rc *RootCommand) Commanders() []Commander {
 	return rc.Commander
 }
 
+func (rc *RootCommand) PersistentFlagsAndRequired() (fs *pflag.FlagSet, required []string) {
+
+	return rc.FlagSet.PersistentFlagsAndRequired()
+}
+
+func (rc *RootCommand) LocalFlagsAndRequired() (fs *pflag.FlagSet, required []string) {
+
+	return fs, required
+}
+
 type commandBuilder struct {
-	Command Commander
+	SimpleCommander SimpleCommander
+	Commander       Commander
+	FlagSet         Flags
 
 	CobraCommand *cobra.Command
 }
 
-func (cb *commandBuilder) buildCobra() {
+func (cb *commandBuilder) buildCobraInSimpleCommander() {
 	if cb.CobraCommand != nil {
 		return
 	}
-	short, long := cb.Command.ShortAndLong()
-	cb.CobraCommand = &cobra.Command{
-		Use:   cb.Command.Use(),
+
+	cb.CobraCommand = cb.buildcobra()
+	if cb.SimpleCommander.SimpleCommands() != nil {
+		for _, simpleCmd := range cb.SimpleCommander.SimpleCommands() {
+			subBuilder := &commandBuilder{
+				Commander: simpleCmd,
+				FlagSet:   simpleCmd,
+			}
+			subBuilder.buildCobraInSimpleCommander()
+			cb.CobraCommand.AddCommand(subBuilder.CobraCommand)
+		}
+	}
+
+}
+
+func (cb *commandBuilder) buildCobraInCommander() {
+	if cb.CobraCommand != nil {
+		return
+	}
+
+	cb.CobraCommand = cb.buildcobra()
+	if cb.Commander.Commanders() != nil {
+		for _, cmder := range cb.Commander.Commanders() {
+			subBuilder := &commandBuilder{
+				Commander: cmder,
+			}
+			subBuilder.buildCobraInCommander()
+			cb.CobraCommand.AddCommand(subBuilder.CobraCommand)
+		}
+	}
+}
+
+func (cb *commandBuilder) buildcobra() *cobra.Command {
+	if cb.SimpleCommander != nil {
+		cb.Commander = cb.SimpleCommander
+		cb.FlagSet = cb.SimpleCommander
+	}
+
+	return buildcobra(cb.Commander, cb.FlagSet)
+}
+
+func buildcobra(cmder Commander, fs Flags) *cobra.Command {
+	short, long := cmder.ShortAndLong()
+	cobraCmd := &cobra.Command{
+		Use:   use(cmder),
 		Short: short,
 		Long:  long,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return cb.Command.PreRun()
+			return cmder.PreRun(args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cb.Command.Run()
+			return cmder.Run(args)
 		},
 		SilenceErrors:              true,
 		SilenceUsage:               true,
 		SuggestionsMinimumDistance: 2,
 	}
 
-	if cb.Command.Commanders() != nil {
-		for _, cmder := range cb.Command.Commanders() {
-			subBuilder := &commandBuilder{
-				Command: cmder,
-			}
-			subBuilder.buildCobra()
-			cb.CobraCommand.AddCommand(subBuilder.CobraCommand)
-		}
+	applyFlags(cobraCmd, fs)
+
+	return cobraCmd
+}
+
+func applyFlags(cmd *cobra.Command, f Flags) {
+	if cmd == nil || f == nil {
+		return
 	}
+
+	pfs, reqf := f.PersistentFlagsAndRequired()
+	cmd.PersistentFlags().AddFlagSet(pfs)
+
+	for _, rf := range reqf {
+		_ = cmd.MarkPersistentFlagRequired(rf)
+	}
+
+	lfs, reqf := f.LocalFlagsAndRequired()
+	cmd.Flags().AddFlagSet(lfs)
+
+	for _, rf := range reqf {
+		_ = cmd.MarkFlagRequired(rf)
+	}
+}
+
+func use(cmder Commander) string {
+	var line = useCommandFlags
+	if cmder.Commanders() == nil || len(cmder.Commanders()) == 0 {
+		line = useFlagsArgs
+	}
+	return fmt.Sprintf("%s %s", cmder.Use(), line)
 }
 
 type Executor struct {

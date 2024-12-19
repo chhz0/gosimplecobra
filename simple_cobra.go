@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/fatih/color"
+	"github.com/gosuri/uitable"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 const (
@@ -50,7 +53,10 @@ type RootCommand struct {
 	Long    string
 
 	Version string
-	Help    string
+	// todo: 添加自定义的help
+	Help string
+	// todo: 启动默认的config && 绑定到子命令的标志
+	EnableConf bool
 
 	FlagSet Flags
 	Args    cobra.PositionalArgs
@@ -63,6 +69,8 @@ type RootCommand struct {
 	SimpleCommander []SimpleCommander
 	// Commander 这是一个实现了 Commander 接口的集合
 	Commander []Commander
+
+	rootCobra *cobra.Command
 }
 
 func NewRootCmd(appName string, opts ...RootOption) *Executor {
@@ -74,11 +82,15 @@ func NewRootCmd(appName string, opts ...RootOption) *Executor {
 		o(rootCmd)
 	}
 
-	rootCobra := buildcobra(rootCmd, rootCmd.FlagSet)
-	rootCobra.Args = rootCmd.Args
+	rootCmd.rootCobra = buildcobra(rootCmd, rootCmd.FlagSet)
+	rootCmd.rootCobra.Args = rootCmd.Args
 
 	if rootCmd.Version != "" {
-		rootCobra.Version = rootCmd.Version
+		rootCmd.rootCobra.Version = rootCmd.Version
+	}
+
+	if rootCmd.EnableConf {
+		rootCmd.loadConfig()
 	}
 
 	if rootCmd.Initialize != nil {
@@ -86,14 +98,14 @@ func NewRootCmd(appName string, opts ...RootOption) *Executor {
 	}
 
 	if len(rootCmd.SimpleCommander) != 0 {
-		rootCmd.buildSimpleCommander(rootCobra)
+		rootCmd.buildSimpleCommander(rootCmd.rootCobra)
 	}
 
 	if len(rootCmd.Commander) != 0 {
-		rootCmd.buildCommander(rootCobra)
+		rootCmd.buildCommander(rootCmd.rootCobra)
 	}
 
-	return &Executor{exec: rootCobra}
+	return &Executor{exec: rootCmd.rootCobra}
 }
 
 type RootOption func(r *RootCommand)
@@ -113,6 +125,12 @@ func WithRootLong(long string) RootOption {
 func WithVersion(version string) RootOption {
 	return func(r *RootCommand) {
 		r.Version = version
+	}
+}
+
+func WithConfig(enable bool) RootOption {
+	return func(r *RootCommand) {
+		r.EnableConf = enable
 	}
 }
 
@@ -158,6 +176,11 @@ func WithRunFunc(runF func(ctx context.Context, args []string) error) RootOption
 	}
 }
 
+func (rc *RootCommand) loadConfig() {
+	rc.rootCobra.Flags().StringVarP(&cfgFile, "config", "c", ".simplecobra.yaml", "config file (default is $HOME/.simplecobra/config.yaml)")
+	cobra.OnInitialize(DefaultInitConfigFunc)
+}
+
 func (rc *RootCommand) buildSimpleCommander(rootCobra *cobra.Command) {
 	for _, simpleCmd := range rc.SimpleCommander {
 		simpleCmdBuilder := &commandBuilder{
@@ -198,6 +221,22 @@ func (rc *RootCommand) Run(args []string) error {
 	if rc.RunFunc == nil {
 		return nil
 	}
+
+	if rc.EnableConf {
+		if err := viper.BindPFlags(rc.rootCobra.PersistentFlags()); err != nil {
+			return err
+		}
+
+		if err := viper.BindPFlags(rc.rootCobra.Flags()); err != nil {
+			return err
+		}
+
+		if err := viper.Unmarshal(rc.FlagSet); err != nil {
+			return err
+		}
+		printConfig()
+	}
+
 	return rc.RunFunc(context.Background(), args)
 }
 
@@ -316,6 +355,22 @@ func use(cmder Commander) string {
 		line = useFlagsArgs
 	}
 	return fmt.Sprintf("%s %s", cmder.Use(), line)
+}
+
+// printConfig 打印配置
+// copy from https://github.com/marmotedu/iam/blob/master/pkg/app/config.go
+func printConfig() {
+	if keys := viper.AllKeys(); len(keys) > 0 {
+		fmt.Printf("%v Configuration items:\n", color.GreenString("==>"))
+		table := uitable.New()
+		table.Separator = " "
+		table.MaxColWidth = 80
+		table.RightAlign(0)
+		for _, k := range keys {
+			table.AddRow(fmt.Sprintf("%s:", k), viper.Get(k))
+		}
+		fmt.Printf("%v\n", table)
+	}
 }
 
 type Executor struct {

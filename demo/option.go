@@ -8,21 +8,19 @@ import (
 )
 
 type RootOption struct {
-	Config     string
-	configPath string
+	AppName string       `mapstructure:"app"`
+	Server  string       `mapstructure:"server"`
+	Print   *PrintOption `mapstructure:"printOption"`
 }
 
 func newRootOption() *RootOption {
-	return &RootOption{
-		Config:     "",
-		configPath: "",
-	}
+	return &RootOption{}
 }
 
 // LocalFlags implements gosimplecobra.Flags.
 func (r *RootOption) LocalFlagsAndRequired() (fs *pflag.FlagSet, required []string) {
 	fs = pflag.NewFlagSet("RootL", pflag.ExitOnError)
-	fs.StringVarP(&r.configPath, "confPath", "d", ".", "loading config from ?")
+	fs.StringVarP(&r.Server, "server", "s", "", "server address")
 
 	return
 }
@@ -30,9 +28,7 @@ func (r *RootOption) LocalFlagsAndRequired() (fs *pflag.FlagSet, required []stri
 // PersistentFlags implements gosimplecobra.Flags.
 func (r *RootOption) PersistentFlagsAndRequired() (fs *pflag.FlagSet, required []string) {
 	fs = pflag.NewFlagSet("RootP", pflag.ExitOnError)
-	fs.StringVarP(&r.Config, "conf", "c", "defaule.toml", "loading config name")
-
-	required = append(required, "conf")
+	fs.StringVarP(&r.AppName, "app", "a", "go-simplecobra", "app name for the application")
 
 	return
 }
@@ -40,8 +36,8 @@ func (r *RootOption) PersistentFlagsAndRequired() (fs *pflag.FlagSet, required [
 var _ gosimplecobra.Flags = (*RootOption)(nil)
 
 type PrintOption struct {
-	print string
-	from  string
+	print string `mapstructure:"print"`
+	from  string `mapstructure:"from"`
 }
 
 func newPrintCmd() gosimplecobra.SimpleCommander {
@@ -58,6 +54,8 @@ func (p *PrintOption) LocalFlagsAndRequired() (fs *pflag.FlagSet, required []str
 	fs = pflag.NewFlagSet("PrintL", pflag.ExitOnError)
 	fs.StringVarP(&p.print, "print", "p", "", "print anything to the screen")
 	fs.StringVarP(&p.from, "from", "f", "", "print from where")
+
+	required = []string{"print"}
 
 	return
 }

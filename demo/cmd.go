@@ -8,11 +8,14 @@ import (
 )
 
 func initCli() *gosimplecobra.Executor {
-	return gosimplecobra.NewRootCmd("gosimplecobra",
+	opts := newRootOption()
+
+	cli := gosimplecobra.NewRootCmd("gosimplecobra",
 		gosimplecobra.WithRootShort("gosimplecobra short desc"),
 		gosimplecobra.WithRootLong("this is a long description for gosimplecobra"),
 		gosimplecobra.WithVersion("0.0.1 Snapshot"),
-		gosimplecobra.WithFlagSets(newRootOption()),
+		gosimplecobra.WithConfig(true),
+		gosimplecobra.WithFlagSets(opts),
 		gosimplecobra.WithInitialize(func() {
 			fmt.Println("gosimplecobra init func")
 		}),
@@ -31,6 +34,7 @@ func initCli() *gosimplecobra.Executor {
 			newEchoCmd(),
 		}),
 	)
+	return cli
 }
 
 func main() {

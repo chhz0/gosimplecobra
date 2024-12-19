@@ -1,0 +1,6 @@
+app: "simplecobra"
+server: "localhost:8080"
+
+printOption:
+  print: "something to print"
+  from: "user"

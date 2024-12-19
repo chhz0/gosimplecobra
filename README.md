@@ -20,23 +20,27 @@ go get github.com/chhz0/gosimplecobra
 
 可以在`demo`目录里查看使用示例，在使用上更加推荐使用`SimpleCommander`接口
 
-直接执行 `gosimplecobra` 命令, 由于设置了`--conf`标志为必须的，所以输出错误信息
+可以直接执行 `gosimplecobra` 命令, 如果设置了`WithConfig`则需要添加`--config`标志指定配置文件. 如果没有指定`config`则在默认位置加载配置文件，输出错误信息
 ```bash
-$ gosimplecobra
-
-gosimplecobra init func
-gosimplecobra prerun func
-panic: required flag(s) "conf" not set
+Error: failed to read configuration file(.simplecobra.yaml): open .simplecobra.yaml: no such file or directory
 ```
-补充`--conf`标志信息即可正常执行
+
+补充`--config`标志信息即可正常执行
 ```bash
-$ gosimplecobra --conf defaule.toml
+$ gosimplecobra --config ./config/demo.yaml
 
 gosimplecobra init func
 gosimplecobra prerun func
+==> Configuration items:
+           server: localhost:8080
+          version: false
+printoption.print: something to print
+ printoption.from: user
+              app: simplecobra
+           config: ./config/demo.yaml
+             help: false
 gosimplecobra run func
 ```
-
 
 执行`-h`命令获取帮助信息
 ```bash
@@ -55,10 +59,11 @@ Available Commands:
   print       Print anything to the screen
 
 Flags:
-  -c, --conf string       loading config name (default "defaule.toml")
-  -d, --confPath string   loading config from ? (default ".")
-  -h, --help              help for gosimplecobra
-  -v, --version           version for gosimplecobra
+  -a, --app string      app name for the application (default "go-simplecobra")
+  -c, --config string   config file (default is $HOME/.simplecobra/config.yaml) (default ".simplecobra.yaml")
+  -h, --help            help for gosimplecobra
+  -s, --server string   server address
+  -v, --version         version for gosimplecobra
 
 Use "gosimplecobra [command] --help" for more information about a command.
 ```
@@ -81,7 +86,7 @@ Flags:
   -h, --help   help for echo
 
 Global Flags:
-  -c, --conf string   loading config name (default "defaule.toml")
+  -a, --app string   app name for the application (default "go-simplecobra")
 
 Use "gosimplecobra echo [command] --help" for more information about a command.
 ```
